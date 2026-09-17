@@ -36,7 +36,7 @@ export class LocalRepository implements DataRepository {
     const seeded = await db.meta.get('seeded');
     if (seeded) return;
     const now = Date.now();
-    await db.transaction('rw', db.categories, db.habits, db.settings, db.meta, async () => {
+    await db.transaction('rw', [db.categories, db.habits, db.settings, db.meta], async () => {
       await db.categories.bulkPut(DEFAULT_CATEGORIES);
       await db.habits.bulkPut(buildSeedHabits(now));
       await db.settings.put(DEFAULT_SETTINGS);
@@ -85,7 +85,7 @@ export class LocalRepository implements DataRepository {
 
   async resetAll() {
     const db = getDB();
-    await db.transaction('rw', db.habits, db.categories, db.completions, db.monthlyPlans, db.reflections, db.meta, async () => {
+    await db.transaction('rw', [db.habits, db.categories, db.completions, db.monthlyPlans, db.reflections, db.meta], async () => {
       await Promise.all([
         db.habits.clear(),
         db.categories.clear(),
@@ -100,7 +100,7 @@ export class LocalRepository implements DataRepository {
 
   async importBackup(payload: BackupPayload, mode: 'merge' | 'replace') {
     const db = getDB();
-    await db.transaction('rw', db.habits, db.categories, db.completions, db.monthlyPlans, db.reflections, db.settings, async () => {
+    await db.transaction('rw', [db.habits, db.categories, db.completions, db.monthlyPlans, db.reflections, db.settings], async () => {
       if (mode === 'replace') {
         await Promise.all([
           db.habits.clear(),
