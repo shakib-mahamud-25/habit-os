@@ -34,7 +34,7 @@ export default function AnalyticsPage() {
     plugins: { legend: { display: false } },
     scales: {
       x: { grid: { display: false }, ticks: { color: colors.text } },
-      y: { min: 0, max: 100, grid: { color: colors.grid }, ticks: { color: colors.text, callback: (v: number) => v + '%' } },
+      y: { min: 0, max: 100, grid: { color: colors.grid }, ticks: { color: colors.text, callback: (v: string | number) => `${v}%` } },
     },
   };
 
