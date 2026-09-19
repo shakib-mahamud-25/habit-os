@@ -143,7 +143,34 @@ nothing is sent anywhere. Because of that:
 
 ## Environment variables
 
-None required for v1. The app runs with zero configuration.
+None required to run the app. One optional variable enables analytics:
+
+| Variable | Required? | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | No | Google Analytics 4 Measurement ID (e.g. `G-XXXXXXXXXX`). Leave unset and GA never loads — zero extra network calls. |
+
+### Adding Google Analytics
+1. Create a GA4 property at https://analytics.google.com and copy its Measurement ID.
+2. In Vercel: **Project → Settings → Environment Variables** → add
+   `NEXT_PUBLIC_GA_MEASUREMENT_ID` = `G-XXXXXXXXXX` → Save.
+3. Redeploy (Vercel → Deployments → ⋯ → Redeploy). `components/analytics/GoogleAnalytics.tsx`
+   picks it up automatically and loads `gtag.js`.
+4. Give it a few minutes, then check **Reports → Realtime** in GA while visiting your
+   own site to confirm it's tracking.
+
+### Editing the footer social links
+`components/layout/Footer.tsx` has three constants at the top
+(`GITHUB_URL`, `FACEBOOK_URL`, `LINKEDIN_URL`) — replace those with your real
+profile URLs.
+
+### Install prompt behavior
+`components/pwa/InstallPrompt.tsx` shows a dismissible top banner:
+- **Chrome/Edge (desktop & Android):** uses the native `beforeinstallprompt`
+  event — clicking "Install" triggers the real browser install dialog.
+- **iOS Safari:** shows manual instructions (Share → Add to Home Screen),
+  since iOS doesn't expose a programmatic install API to websites.
+- Already-installed visitors (`display-mode: standalone`) never see it.
+- Dismissing it hides it for 14 days (stored in `localStorage`, per device).
 
 ## Known limitations / honest notes
 

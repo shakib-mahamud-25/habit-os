@@ -7,6 +7,8 @@ import {
   History, Settings as SettingsIcon, Database, Menu, X, Sun, Moon, Monitor,
 } from 'lucide-react';
 import { useAppData } from '@/hooks/useAppData';
+import { Footer } from './Footer';
+import { InstallPrompt } from '@/components/pwa/InstallPrompt';
 
 const NAV_PRIMARY = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -58,7 +60,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div id="app-root">
       <div className="sidebar">
-        <div className="brand">Habit OS</div>
+        <Link href="/dashboard" className="brand" style={{ textDecoration: 'none' }}>Habit OS</Link>
         <nav className="nav-group">
           {NAV_PRIMARY.map(({ href, label, icon: Icon }) => (
             <Link key={href} href={href} className={`nav-item ${pathname === href ? 'active' : ''}`}>
@@ -81,11 +83,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="main">
         <div className="topbar">
-          <div className="brand" style={{ padding: 0 }}>Habit OS</div>
+          <Link href="/dashboard" className="brand" style={{ padding: 0, textDecoration: 'none' }}>Habit OS</Link>
           <button className="icon-btn" onClick={() => setSheetOpen(true)} aria-label="Open menu"><Menu size={18} /></button>
         </div>
         <div id="page-content">{loading ? <LoadingState /> : children}</div>
+        {!loading && <Footer />}
       </div>
+      <InstallPrompt />
 
       <div className="bottom-nav">
         <div className="bottom-nav-inner">
