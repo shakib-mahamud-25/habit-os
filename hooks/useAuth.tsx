@@ -1,7 +1,7 @@
 'use client';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import {
-  User, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as firebaseSignOut,
+  User, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as firebaseSignOut,
 } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase/config';
 
@@ -16,6 +16,12 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 const TAG = '[HabitOS Auth]';
 
+// DIAGNOSTIC MODE: temporarily using signInWithPopup instead of
+// signInWithRedirect, to isolate whether the sync issue is specific to the
+// redirect flow. Safe to flip back to false once we know which one works --
+// see the comment above signInWithGoogle below.
+const USE_POPUP_FOR_TESTING = true;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,20 +30,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     console.log(TAG, 'checking for a pending redirect result…');
 
-    // Surfaces errors from the redirect flow itself (blocked popup fallback,
-    // account-exists-with-different-credential, etc). The actual signed-in
-    // state always comes from onAuthStateChanged below, not from here --
-    // this is purely for error reporting/diagnostics after the redirect
-    // returns.
     getRedirectResult(auth)
       .then((result) => {
         if (result) {
           console.log(TAG, 'getRedirectResult: got a signed-in user ->', result.user.uid, result.user.email);
         } else {
-          console.log(TAG, 'getRedirectResult: resolved with NULL (no pending redirect found). ' +
-            'If you just came back from Google\'s account picker, this usually means the browser blocked ' +
-            'the storage/iframe Firebase needs to complete the redirect -- try a different browser profile ' +
-            '(e.g. not a School/Workspace-managed one) or disable any ad-blocker/privacy extension for this site.');
+          console.log(TAG, 'getRedirectResult: resolved with NULL (no pending redirect found).');
         }
       })
       .catch((err) => {
@@ -56,9 +54,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = useCallback(async () => {
     setError(null);
+    if (USE_POPUP_FOR_TESTING) {
+      console.log(TAG, 'starting signInWithPopup (diagnostic mode)…');
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        console.log(TAG, 'signInWithPopup SUCCEEDED ->', result.user.uid, result.user.email);
+      } catch (err) {
+        const code = (err as { code?: string })?.code;
+        console.error(TAG, 'signInWithPopup FAILED:', code, err);
+        setError(err instanceof Error ? `${code ? `[${code}] ` : ''}${err.message}` : 'Sign-in failed. Please try again.');
+      }
+      return;
+    }
     console.log(TAG, 'starting signInWithRedirect…');
-    // Redirect (not popup): popups are unreliable inside installed PWA
-    // windows, especially on iOS.
     await signInWithRedirect(auth, googleProvider);
   }, []);
 
