@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   getFirestore, Firestore,
@@ -30,10 +30,30 @@ if (typeof window !== 'undefined') {
     authDomain: firebaseConfig.authDomain || 'MISSING',
     projectId: firebaseConfig.projectId || 'MISSING',
   });
+  // Surface the exact origin the browser is actually running on, since
+  // "auth/unauthorized-domain" depends on this matching an entry in
+  // Firebase Console -> Authentication -> Settings -> Authorized domains
+  // EXACTLY (no protocol, no trailing slash, no path).
+  console.log('[HabitOS Firebase] current origin (must be in Authorized Domains) ->', window.location.hostname);
 }
 
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+// Force account chooser every time instead of silently reusing whatever
+// Google session is cached in the browser -- avoids a class of "signs in
+// as the wrong account" / "seems to do nothing" reports.
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+if (typeof window !== 'undefined') {
+  // Explicit local persistence (survives tab close, required for the
+  // redirect flow to work at all -- signInWithRedirect leaves the page
+  // entirely, so whatever remembers "a sign-in is in progress" has to be
+  // durable, not memory-only). This is Firebase's default, but setting it
+  // explicitly removes any doubt and logs failures instead of failing silently.
+  setPersistence(auth, browserLocalPersistence).catch((err) => {
+    console.error('[HabitOS Firebase] setPersistence FAILED (falling back to default):', err);
+  });
+}
 
 // Persistent local cache + multi-tab coordination. This is what makes
 // Firestore's real-time listeners stay in sync across browser tabs on the
