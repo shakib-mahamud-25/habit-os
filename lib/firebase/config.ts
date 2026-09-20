@@ -20,6 +20,18 @@ const firebaseConfig = {
 // Firebase Auth settings, not hiding this object.
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
+if (typeof window !== 'undefined') {
+  // One-time boot diagnostic: confirms whether the NEXT_PUBLIC_FIREBASE_*
+  // env vars actually made it into this deployed build. If authDomain or
+  // projectId print as "undefined" here, the env vars weren't set at
+  // build time -- re-check Vercel's Environment Variables and redeploy.
+  console.log('[HabitOS Firebase] config in this build ->', {
+    apiKey: firebaseConfig.apiKey ? `${firebaseConfig.apiKey.slice(0, 6)}…` : 'MISSING',
+    authDomain: firebaseConfig.authDomain || 'MISSING',
+    projectId: firebaseConfig.projectId || 'MISSING',
+  });
+}
+
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
