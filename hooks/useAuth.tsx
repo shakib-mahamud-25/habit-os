@@ -1,7 +1,7 @@
 'use client';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import {
-  User, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as firebaseSignOut,
+  User, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as firebaseSignOut,
 } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase/config';
 
@@ -16,16 +16,18 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 const TAG = '[HabitOS Auth]';
 
-// DIAGNOSTIC MODE: temporarily using signInWithPopup instead of
-// signInWithRedirect, to isolate whether the sync issue is specific to the
-// redirect flow. Safe to flip back to false once we know which one works --
-// see the comment above signInWithGoogle below.
-const USE_POPUP_FOR_TESTING = true;
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Tracks whether we're still waiting on getRedirectResult() to settle.
+  // We hold `loading: true` until BOTH the redirect check and the first
+  // onAuthStateChanged callback have fired, so AuthGate never flashes the
+  // login screen in the gap between "redirect result: null" (expected on
+  // first return) and "onAuthStateChanged: signed in" (arrives a moment
+  // later once Firebase's persisted session hydrates).
+  const [redirectChecked, setRedirectChecked] = useState(false);
+  const [authStateChecked, setAuthStateChecked] = useState(false);
 
   useEffect(() => {
     console.log(TAG, 'checking for a pending redirect result…');
@@ -34,6 +36,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .then((result) => {
         if (result) {
           console.log(TAG, 'getRedirectResult: got a signed-in user ->', result.user.uid, result.user.email);
+          // Setting user here too (not just relying on onAuthStateChanged)
+          // closes the race where onAuthStateChanged hasn't fired yet but
+          // we already know, definitively, that sign-in succeeded.
+          setUser(result.user);
         } else {
           console.log(TAG, 'getRedirectResult: resolved with NULL (no pending redirect found).');
         }
@@ -42,32 +48,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const code = (err as { code?: string })?.code;
         console.error(TAG, 'getRedirectResult FAILED:', code, err);
         setError(err instanceof Error ? `${code ? `[${code}] ` : ''}${err.message}` : 'Sign-in failed. Please try again.');
-      });
+      })
+      .finally(() => setRedirectChecked(true));
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       console.log(TAG, 'onAuthStateChanged fired ->', u ? `signed in as ${u.uid} (${u.email})` : 'signed out / no user');
       setUser(u);
-      setLoading(false);
+      setAuthStateChecked(true);
     });
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (redirectChecked && authStateChecked) setLoading(false);
+  }, [redirectChecked, authStateChecked]);
+
   const signInWithGoogle = useCallback(async () => {
     setError(null);
-    if (USE_POPUP_FOR_TESTING) {
-      console.log(TAG, 'starting signInWithPopup (diagnostic mode)…');
-      try {
-        const result = await signInWithPopup(auth, googleProvider);
-        console.log(TAG, 'signInWithPopup SUCCEEDED ->', result.user.uid, result.user.email);
-      } catch (err) {
-        const code = (err as { code?: string })?.code;
-        console.error(TAG, 'signInWithPopup FAILED:', code, err);
-        setError(err instanceof Error ? `${code ? `[${code}] ` : ''}${err.message}` : 'Sign-in failed. Please try again.');
-      }
-      return;
-    }
     console.log(TAG, 'starting signInWithRedirect…');
-    await signInWithRedirect(auth, googleProvider);
+    try {
+      await signInWithRedirect(auth, googleProvider);
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      console.error(TAG, 'signInWithRedirect FAILED to start:', code, err);
+      setError(err instanceof Error ? `${code ? `[${code}] ` : ''}${err.message}` : 'Sign-in failed. Please try again.');
+    }
   }, []);
 
   const signOut = useCallback(async () => {
