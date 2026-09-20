@@ -14,6 +14,7 @@ interface AuthState {
 }
 
 const AuthContext = createContext<AuthState | null>(null);
+const TAG = '[HabitOS Auth]';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -21,15 +22,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log(TAG, 'checking for a pending redirect result…');
+
     // Surfaces errors from the redirect flow itself (blocked popup fallback,
     // account-exists-with-different-credential, etc). The actual signed-in
     // state always comes from onAuthStateChanged below, not from here --
-    // this is purely for error reporting after the redirect returns.
-    getRedirectResult(auth).catch((err) => {
-      setError(err instanceof Error ? err.message : 'Sign-in failed. Please try again.');
-    });
+    // this is purely for error reporting/diagnostics after the redirect
+    // returns.
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result) {
+          console.log(TAG, 'getRedirectResult: got a signed-in user ->', result.user.uid, result.user.email);
+        } else {
+          console.log(TAG, 'getRedirectResult: resolved with NULL (no pending redirect found). ' +
+            'If you just came back from Google\'s account picker, this usually means the browser blocked ' +
+            'the storage/iframe Firebase needs to complete the redirect -- try a different browser profile ' +
+            '(e.g. not a School/Workspace-managed one) or disable any ad-blocker/privacy extension for this site.');
+        }
+      })
+      .catch((err) => {
+        const code = (err as { code?: string })?.code;
+        console.error(TAG, 'getRedirectResult FAILED:', code, err);
+        setError(err instanceof Error ? `${code ? `[${code}] ` : ''}${err.message}` : 'Sign-in failed. Please try again.');
+      });
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
+      console.log(TAG, 'onAuthStateChanged fired ->', u ? `signed in as ${u.uid} (${u.email})` : 'signed out / no user');
       setUser(u);
       setLoading(false);
     });
@@ -38,12 +56,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = useCallback(async () => {
     setError(null);
+    console.log(TAG, 'starting signInWithRedirect…');
     // Redirect (not popup): popups are unreliable inside installed PWA
     // windows, especially on iOS.
     await signInWithRedirect(auth, googleProvider);
   }, []);
 
   const signOut = useCallback(async () => {
+    console.log(TAG, 'signing out');
     await firebaseSignOut(auth);
   }, []);
 
