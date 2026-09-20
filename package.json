@@ -18,7 +18,7 @@
     "react-chartjs-2": "5.2.0",
     "lucide-react": "0.400.0",
     "framer-motion": "11.3.0",
-    "firebase": "10.12.2"
+    "firebase": "^12.19.0"
   },
   "devDependencies": {
     "typescript": "5.5.3",
