@@ -26,7 +26,7 @@ export default function CalendarPage() {
         <>
           <MonthlyCalendar
             year={activeMonth.year} month={activeMonth.month} habits={active}
-            index={completionIndex} weekStart={settings.weekStart} ring={colors.ring}
+            index={completionIndex} weekStart={settings.weekStart}
             onOpenDay={setOpenDay}
           />
           <div className="surface card" style={{ marginTop: 14 }}>

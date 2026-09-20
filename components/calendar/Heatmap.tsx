@@ -2,12 +2,7 @@
 import type { ReactNode } from 'react';
 import { Habit, DailyCompletion } from '@/types';
 import { addDaysISO, todayISO, parseISO } from '@/lib/dates';
-
-function intensityColor(pct: number, ring: string): string {
-  if (pct <= 0) return 'var(--surface-2)';
-  const a = 0.15 + Math.min(pct, 100) / 100 * 0.6;
-  return `rgba(${ring},${a.toFixed(2)})`;
-}
+import { intensityColor } from './intensity';
 
 export function Heatmap({ habits, index, ring }: { habits: Habit[]; index: Map<string, DailyCompletion>; ring: string }) {
   const today = todayISO();
@@ -34,5 +29,26 @@ export function Heatmap({ habits, index, ring }: { habits: Habit[]; index: Map<s
       cells.push(<div key={ds} className="heat-cell" title={`${ds}: ${Math.round(pct)}%`} style={{ background: intensityColor(pct, ring) }} />);
     }
   }
-  return <div className="heat-grid">{cells}</div>;
+
+  // 10-step legend at 10% intervals, using the exact same ramp as the cells above.
+  const steps = Array.from({ length: 10 }, (_, i) => (i + 1) * 10);
+
+  return (
+    <div>
+      <div className="heat-grid">{cells}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 14 }}>
+        <span className="muted" style={{ fontSize: 11 }}>0%</span>
+        <div style={{ display: 'flex', gap: 2 }}>
+          {steps.map((p) => (
+            <span
+              key={p}
+              title={`${p}%`}
+              style={{ width: 16, height: 10, background: intensityColor(p, ring), border: '1px solid var(--border)' }}
+            />
+          ))}
+        </div>
+        <span className="muted" style={{ fontSize: 11 }}>100%</span>
+      </div>
+    </div>
+  );
 }

@@ -2,17 +2,11 @@
 import { Habit, DailyCompletion, WeekStart } from '@/types';
 import { daysInMonth, todayISO, iso, parseISO } from '@/lib/dates';
 
-function intensityColor(pct: number, ring: string): string {
-  if (pct <= 0) return 'var(--surface-2)';
-  const a = 0.15 + Math.min(pct, 100) / 100 * 0.6;
-  return `rgba(${ring},${a.toFixed(2)})`;
-}
-
 export function MonthlyCalendar({
-  year, month, habits, index, weekStart, ring, onOpenDay,
+  year, month, habits, index, weekStart, onOpenDay,
 }: {
   year: number; month: number; habits: Habit[]; index: Map<string, DailyCompletion>;
-  weekStart: WeekStart; ring: string; onOpenDay: (date: string) => void;
+  weekStart: WeekStart; ring?: string; onOpenDay: (date: string) => void;
 }) {
   const dim = daysInMonth(year, month);
   const firstDow = new Date(year, month, 1).getDay();
@@ -45,16 +39,20 @@ export function MonthlyCalendar({
             if (rec && rec.completed) doneN++;
           }
           const pct = totalN ? Math.round((doneN / totalN) * 100) : 0;
-          const bg = future ? 'var(--surface)' : intensityColor(pct, ring);
           return (
             <button
               key={ds} className={`cal-cell ${ds === today ? 'today' : ''}`}
-              style={{ background: bg, cursor: future ? 'default' : 'pointer' }}
+              style={{ background: future ? 'var(--surface)' : 'var(--surface-2)', cursor: future ? 'default' : 'pointer' }}
               onClick={() => !future && onOpenDay(ds)}
               disabled={future}
             >
-              <span className="d">{d}</span>
-              {!future && <span className="p">{pct}%</span>}
+              {!future && pct > 0 && (
+                <div className="cal-fill" style={{ height: `${pct}%` }} />
+              )}
+              <div className="cal-chip">
+                <span className="d">{d}</span>
+                {!future && <span className="p">{pct}%</span>}
+              </div>
             </button>
           );
         })}
