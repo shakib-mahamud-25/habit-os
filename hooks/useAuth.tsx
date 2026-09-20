@@ -20,48 +20,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Tracks whether we're still waiting on getRedirectResult() to settle.
-  // We hold `loading: true` until BOTH the redirect check and the first
-  // onAuthStateChanged callback have fired, so AuthGate never flashes the
-  // login screen in the gap between "redirect result: null" (expected on
-  // first return) and "onAuthStateChanged: signed in" (arrives a moment
-  // later once Firebase's persisted session hydrates).
-  const [redirectChecked, setRedirectChecked] = useState(false);
-  const [authStateChecked, setAuthStateChecked] = useState(false);
 
   useEffect(() => {
-    console.log(TAG, 'checking for a pending redirect result…');
+    let cancelled = false;
 
-    getRedirectResult(auth)
-      .then((result) => {
+    // auth.authStateReady() is Firebase's own documented fix for the
+    // pendingRedirect race (firebase/firebase-js-sdk#6827): it resolves
+    // only once Auth has fully finished its internal boot sequence --
+    // including consuming any pending redirect result -- so nothing here
+    // can run ahead of that and see a stale/incomplete state.
+    (async () => {
+      console.log(TAG, 'waiting for auth.authStateReady()…');
+      try {
+        await auth.authStateReady();
+      } catch (err) {
+        console.error(TAG, 'authStateReady() rejected (unexpected):', err);
+      }
+      if (cancelled) return;
+      console.log(TAG, 'authStateReady() resolved. auth.currentUser ->', auth.currentUser?.uid || 'null');
+
+      // getRedirectResult still needs to be called (even after
+      // authStateReady) to surface any *error* from the redirect flow
+      // itself, and to get the AdditionalUserInfo Firebase only attaches
+      // to this specific call. It no longer races onAuthStateChanged --
+      // authStateReady already guarantees the underlying state is settled.
+      try {
+        const result = await getRedirectResult(auth);
         if (result) {
           console.log(TAG, 'getRedirectResult: got a signed-in user ->', result.user.uid, result.user.email);
-          // Setting user here too (not just relying on onAuthStateChanged)
-          // closes the race where onAuthStateChanged hasn't fired yet but
-          // we already know, definitively, that sign-in succeeded.
-          setUser(result.user);
         } else {
-          console.log(TAG, 'getRedirectResult: resolved with NULL (no pending redirect found).');
+          console.log(TAG, 'getRedirectResult: NULL (no pending redirect, or already consumed by authStateReady()).');
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         const code = (err as { code?: string })?.code;
         console.error(TAG, 'getRedirectResult FAILED:', code, err);
-        setError(err instanceof Error ? `${code ? `[${code}] ` : ''}${err.message}` : 'Sign-in failed. Please try again.');
-      })
-      .finally(() => setRedirectChecked(true));
+        if (!cancelled) {
+          setError(err instanceof Error ? `${code ? `[${code}] ` : ''}${err.message}` : 'Sign-in failed. Please try again.');
+        }
+      }
+    })();
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       console.log(TAG, 'onAuthStateChanged fired ->', u ? `signed in as ${u.uid} (${u.email})` : 'signed out / no user');
+      if (cancelled) return;
       setUser(u);
-      setAuthStateChecked(true);
+      setLoading(false);
     });
-    return () => unsubscribe();
-  }, []);
 
-  useEffect(() => {
-    if (redirectChecked && authStateChecked) setLoading(false);
-  }, [redirectChecked, authStateChecked]);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
 
   const signInWithGoogle = useCallback(async () => {
     setError(null);
