@@ -1,7 +1,7 @@
 'use client';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import {
-  User, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as firebaseSignOut,
+  User, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut as firebaseSignOut,
 } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase/config';
 
@@ -24,11 +24,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    // auth.authStateReady() is Firebase's own documented fix for the
-    // pendingRedirect race (firebase/firebase-js-sdk#6827): it resolves
-    // only once Auth has fully finished its internal boot sequence --
-    // including consuming any pending redirect result -- so nothing here
-    // can run ahead of that and see a stale/incomplete state.
     (async () => {
       console.log(TAG, 'waiting for auth.authStateReady()…');
       try {
@@ -37,19 +32,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error(TAG, 'authStateReady() rejected (unexpected):', err);
       }
       if (cancelled) return;
-      console.log(TAG, 'authStateReady() resolved. auth.currentUser ->', auth.currentUser?.uid || 'null');
 
-      // getRedirectResult still needs to be called (even after
-      // authStateReady) to surface any *error* from the redirect flow
-      // itself, and to get the AdditionalUserInfo Firebase only attaches
-      // to this specific call. It no longer races onAuthStateChanged --
-      // authStateReady already guarantees the underlying state is settled.
+      // Only relevant if signInWithGoogle had to fall back to redirect
+      // (see below) -- picks up the result on return. On a normal popup
+      // sign-in this always resolves null, which is expected and fine.
       try {
         const result = await getRedirectResult(auth);
         if (result) {
           console.log(TAG, 'getRedirectResult: got a signed-in user ->', result.user.uid, result.user.email);
-        } else {
-          console.log(TAG, 'getRedirectResult: NULL (no pending redirect, or already consumed by authStateReady()).');
         }
       } catch (err) {
         const code = (err as { code?: string })?.code;
@@ -75,12 +65,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = useCallback(async () => {
     setError(null);
-    console.log(TAG, 'starting signInWithRedirect…');
+    // Popup is the primary method: the main window/tab never navigates
+    // away, so it has no dependency on sessionStorage (or any other
+    // per-navigation state) surviving a round trip to accounts.google.com.
+    // That dependency is what was actually breaking sign-in here --
+    // sessionStorage was coming back empty after the redirect round trip
+    // in this environment, regardless of Firebase SDK version.
+    console.log(TAG, 'starting signInWithPopup…');
     try {
-      await signInWithRedirect(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider);
+      console.log(TAG, 'signInWithPopup SUCCEEDED ->', result.user.uid, result.user.email);
+      return;
     } catch (err) {
       const code = (err as { code?: string })?.code;
-      console.error(TAG, 'signInWithRedirect FAILED to start:', code, err);
+      // These specific codes mean the popup itself couldn't open/complete
+      // (blocked by the browser, or the environment is a webview that
+      // doesn't support window.open reliably) -- fall back to redirect
+      // rather than just failing. Any other error (e.g. the user closing
+      // the popup) is reported as-is, no fallback.
+      const popupUnavailable = code === 'auth/popup-blocked'
+        || code === 'auth/operation-not-supported-in-this-environment'
+        || code === 'auth/cancelled-popup-request';
+      if (popupUnavailable) {
+        console.warn(TAG, `signInWithPopup unavailable (${code}), falling back to signInWithRedirect…`);
+        try {
+          await signInWithRedirect(auth, googleProvider);
+        } catch (redirectErr) {
+          const rCode = (redirectErr as { code?: string })?.code;
+          console.error(TAG, 'signInWithRedirect fallback FAILED to start:', rCode, redirectErr);
+          setError(redirectErr instanceof Error ? `${rCode ? `[${rCode}] ` : ''}${redirectErr.message}` : 'Sign-in failed. Please try again.');
+        }
+        return;
+      }
+      console.error(TAG, 'signInWithPopup FAILED:', code, err);
       setError(err instanceof Error ? `${code ? `[${code}] ` : ''}${err.message}` : 'Sign-in failed. Please try again.');
     }
   }, []);
