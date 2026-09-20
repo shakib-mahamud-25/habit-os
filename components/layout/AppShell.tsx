@@ -4,9 +4,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, CircleCheck, Table2, CalendarDays, BarChart3, ListChecks,
-  History, Settings as SettingsIcon, Database, Menu, X, Sun, Moon, Monitor,
+  History, Settings as SettingsIcon, Database, Menu, X, Sun, Moon, Monitor, LogOut,
 } from 'lucide-react';
 import { useAppData } from '@/hooks/useAppData';
+import { useAuth } from '@/hooks/useAuth';
 import { Footer } from './Footer';
 import { InstallPrompt } from '@/components/pwa/InstallPrompt';
 
@@ -40,6 +41,7 @@ function ThemeToggleLabel({ theme }: { theme: string }) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { settings, saveSettings, loading, error } = useAppData();
+  const { user, signOut } = useAuth();
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const cycleTheme = () => {
@@ -77,6 +79,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
         <div className="sidebar-foot">
+          {user && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', marginBottom: 2 }}>
+              {user.photoURL ? (
+                <img src={user.photoURL} alt="" width={22} height={22} style={{ borderRadius: 999 }} referrerPolicy="no-referrer" />
+              ) : (
+                <div style={{ width: 22, height: 22, borderRadius: 999, background: 'var(--accent-soft)' }} />
+              )}
+              <span style={{ fontSize: 12.5, fontWeight: 500, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user.displayName || user.email}
+              </span>
+              <button className="icon-btn" style={{ width: 26, height: 26, flexShrink: 0 }} onClick={() => signOut()} aria-label="Sign out">
+                <LogOut size={13} />
+              </button>
+            </div>
+          )}
           <button className="nav-item" onClick={cycleTheme}><ThemeToggleLabel theme={settings.theme} /></button>
         </div>
       </div>
@@ -124,6 +141,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button className="nav-item" style={{ fontSize: 15, minHeight: 44 }} onClick={cycleTheme}>
               <ThemeToggleLabel theme={settings.theme} />
             </button>
+            {user && (
+              <button className="nav-item" style={{ fontSize: 15, minHeight: 44 }} onClick={() => signOut()}>
+                <LogOut size={18} /><span>Sign out</span>
+              </button>
+            )}
           </div>
         </>
       )}

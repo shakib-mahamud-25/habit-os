@@ -1,6 +1,7 @@
 'use client';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { repository } from '@/lib/data';
+import { useAuth } from '@/hooks/useAuth';
 import { Habit, Category, DailyCompletion, MonthlyPlan, MonthlyReflection, Settings, BackupPayload } from '@/types';
 import { buildCompletionIndex } from '@/lib/streaks';
 
@@ -31,10 +32,12 @@ interface AppDataState {
 }
 
 const AppDataContext = createContext<AppDataState | null>(null);
-
 const FALLBACK_SETTINGS: Settings = { id: 'app', theme: 'system', weekStart: 'monday', overallStreakMode: 'all' };
 
 export function AppDataProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const uid = user?.uid ?? null;
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [habits, setHabits] = useState<Habit[]>([]);
@@ -46,30 +49,55 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const now = new Date();
   const [activeMonth, setActiveMonth] = useState({ year: now.getFullYear(), month: now.getMonth() });
 
-  const refresh = useCallback(async () => {
-    const data = await repository.loadAll();
-    setHabits(data.habits);
-    setCategories(data.categories);
-    setCompletions(data.completions);
-    setMonthlyPlans(data.monthlyPlans);
-    setReflections(data.reflections);
-    setSettings(data.settings);
-  }, []);
-
+  // AuthGate guarantees `uid` is set by the time this provider's children
+  // render (it shows the login screen otherwise), so this effect only ever
+  // runs for a signed-in user -- but it still guards on `uid` in case that
+  // ever changes (e.g. sign-out from another tab).
   useEffect(() => {
+    if (!uid) { setLoading(false); return; }
     let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+    setLoading(true);
+    setError(null);
+    repository.setUser?.(uid);
+
     (async () => {
       try {
         await repository.seedIfEmpty();
-        await refresh();
+        if (cancelled) return;
+
+        if (repository.subscribeAll) {
+          // Real-time: fires immediately with current data, then again on
+          // every change -- this tab, another tab, or another device signed
+          // into this same account. This is the actual fix for data not
+          // being in sync across pages/devices.
+          unsubscribe = repository.subscribeAll(
+            (data) => {
+              if (cancelled) return;
+              setHabits(data.habits);
+              setCategories(data.categories);
+              setCompletions(data.completions);
+              setMonthlyPlans(data.monthlyPlans);
+              setReflections(data.reflections);
+              setSettings(data.settings);
+              setLoading(false);
+            },
+            (err) => { if (!cancelled) setError(err instanceof Error ? err.message : 'Sync error.'); }
+          );
+        } else {
+          const data = await repository.loadAll();
+          if (cancelled) return;
+          setHabits(data.habits); setCategories(data.categories); setCompletions(data.completions);
+          setMonthlyPlans(data.monthlyPlans); setReflections(data.reflections); setSettings(data.settings);
+          setLoading(false);
+        }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load local data.');
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setError(err instanceof Error ? err.message : 'Failed to load data.'); setLoading(false); }
       }
     })();
-    return () => { cancelled = true; };
-  }, [refresh]);
+
+    return () => { cancelled = true; unsubscribe?.(); };
+  }, [uid]);
 
   const completionIndex = useMemo(() => buildCompletionIndex(completions), [completions]);
 
@@ -83,39 +111,31 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // None of the actions below patch local state themselves anymore -- the
+  // live subscription above is the single source of truth, and Firestore's
+  // local cache makes it update within milliseconds (before the write even
+  // reaches the server), so this stays instant without two code paths that
+  // could ever disagree with each other.
   const toggleCompletion = useCallback(async (date: string, habitId: string) => {
-    const rec = await repository.toggleCompletion(date, habitId);
-    setCompletions((prev) => {
-      const i = prev.findIndex((c) => c.id === rec.id);
-      if (i >= 0) { const next = [...prev]; next[i] = rec; return next; }
-      return [...prev, rec];
-    });
+    await repository.toggleCompletion(date, habitId);
   }, []);
 
   const saveHabitFn = useCallback(async (habit: Habit) => {
     const toSave: Habit = { ...habit, updatedAt: Date.now() };
     if (!toSave.createdAt) toSave.createdAt = Date.now();
+    if (!toSave.id) toSave.id = `habit_${Math.random().toString(36).slice(2, 10)}`;
+    if (toSave.sortOrder === undefined) toSave.sortOrder = habits.length;
     await repository.saveHabit(toSave);
-    setHabits((prev) => {
-      const i = prev.findIndex((h) => h.id === toSave.id);
-      const next = i >= 0 ? prev.map((h) => (h.id === toSave.id ? toSave : h)) : [...prev, toSave];
-      return next.sort((a, b) => a.sortOrder - b.sortOrder);
-    });
-  }, []);
+  }, [habits.length]);
 
   const setHabitActive = useCallback(async (id: string, active: boolean) => {
-    setHabits((prev) => {
-      const h = prev.find((x) => x.id === id);
-      if (!h) return prev;
-      const updated = { ...h, active, updatedAt: Date.now() };
-      repository.saveHabit(updated);
-      return prev.map((x) => (x.id === id ? updated : x));
-    });
-  }, []);
+    const h = habits.find((x) => x.id === id);
+    if (!h) return;
+    await repository.saveHabit({ ...h, active, updatedAt: Date.now() });
+  }, [habits]);
 
   const deleteHabit = useCallback(async (id: string) => {
     await repository.deleteHabit(id);
-    setHabits((prev) => prev.filter((h) => h.id !== id));
   }, []);
 
   const saveCategory = useCallback(async (category: Category) => {
@@ -123,10 +143,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     if (!toSave.id) toSave.id = `cat_${Math.random().toString(36).slice(2, 10)}`;
     if (toSave.sortOrder === undefined) toSave.sortOrder = categories.length;
     await repository.saveCategory(toSave);
-    setCategories((prev) => {
-      const i = prev.findIndex((c) => c.id === toSave.id);
-      return i >= 0 ? prev.map((c) => (c.id === toSave.id ? toSave : c)) : [...prev, toSave];
-    });
   }, [categories.length]);
 
   const saveReflectionFn = useCallback(async (year: number, month: number, data: Partial<MonthlyReflection>) => {
@@ -136,37 +152,21 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       ...data, updatedAt: Date.now(),
     };
     await repository.saveReflection(rec);
-    setReflections((prev) => {
-      const i = prev.findIndex((r) => r.id === id);
-      return i >= 0 ? prev.map((r) => (r.id === id ? rec : r)) : [...prev, rec];
-    });
   }, []);
 
   const saveSettingsFn = useCallback(async (patch: Partial<Settings>) => {
-    const next = { ...settings, ...patch, id: 'app' as const };
-    await repository.saveSettings(next);
-    setSettings(next);
+    await repository.saveSettings({ ...settings, ...patch, id: 'app' });
   }, [settings]);
 
   const saveMonthlyGoalOverride = useCallback(async (year: number, month: number, habitId: string, goal: number) => {
     const id = `${year}-${String(month + 1).padStart(2, '0')}_${habitId}`;
-    const rec: MonthlyPlan = { id, year, month, habitId, goal };
-    await repository.saveMonthlyPlan(rec);
-    setMonthlyPlans((prev) => {
-      const i = prev.findIndex((p) => p.id === id);
-      return i >= 0 ? prev.map((p) => (p.id === id ? rec : p)) : [...prev, rec];
-    });
+    await repository.saveMonthlyPlan({ id, year, month, habitId, goal });
   }, []);
 
-  const resetAll = useCallback(async () => {
-    await repository.resetAll();
-    await refresh();
-  }, [refresh]);
-
+  const resetAll = useCallback(async () => { await repository.resetAll(); }, []);
   const importBackup = useCallback(async (payload: BackupPayload, mode: 'merge' | 'replace') => {
     await repository.importBackup(payload, mode);
-    await refresh();
-  }, [refresh]);
+  }, []);
 
   const value: AppDataState = {
     loading, error, habits, categories, completions, monthlyPlans, reflections, settings, completionIndex,

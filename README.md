@@ -1,18 +1,22 @@
 # Habit OS
 
-A local-first personal habit tracking and self-improvement system.
+A personal habit tracking and self-improvement system with real-time sync.
 
 > Track → Analyze → Reflect → Improve
 
-Built with Next.js 14 (App Router), TypeScript, Tailwind CSS, Dexie (IndexedDB),
-Chart.js and Framer Motion. Works fully offline, installs as a PWA, and stores
-all data on-device — no account, no backend, no tracking.
+Built with Next.js 14 (App Router), TypeScript, Tailwind CSS, Firebase
+(Auth + Firestore), Chart.js and Framer Motion. Sign in with Google, and
+your data syncs live across every tab and device — installs as a PWA too.
+
+**Setup:** see `FIREBASE_SETUP.md` for the required Firebase project setup
+(this app won't run without it — Firestore is the only data store now).
 
 ## Architecture
 
 ```
 app/                  Route pages (App Router), one folder per screen
 components/
+  auth/                LoginScreen, AuthGate (shown instead of the app when signed out)
   layout/              Sidebar, mobile nav, page header, month selector
   ui/                   Button-less design system pieces: modal, toast, kpi card, etc.
   habits/                Habit/category checkboxes, rows, editors
@@ -21,33 +25,38 @@ components/
   charts/                   Chart.js registration
   pwa/                        Service worker registration, theme sync
 lib/
+  firebase/             Firebase app/auth/Firestore initialization
   data/                 DataRepository abstraction
     repository.ts        the interface every storage backend implements
-    local-repository.ts   IndexedDB implementation (used today)
-    firebase-repository.ts  placeholder for future cloud sync
-    db.ts                 Dexie schema
+    firebase-repository.ts  Firestore implementation (active today) — real-time via onSnapshot
+    local-repository.ts   IndexedDB implementation, kept for reference / possible offline mode
     seed.ts                default habits/categories, sourced from the original workbook
   dates.ts             Calendar-correct date utilities (leap years, month lengths, etc.)
   streaks.ts           Streak engine (per-habit + overall)
   analytics.ts         Goal completion vs. daily consistency calculations
   export.ts            JSON backup + CSV export/import
 hooks/
-  useAppData.tsx        Central app state (loads once, all pages subscribe to it)
+  useAuth.tsx            Firebase auth state (Google sign-in via redirect)
+  useAppData.tsx        Central app state, live-subscribed to Firestore, all pages read from it
   useChartColors.ts      Keeps charts in sync with light/dark theme
 types/                 Shared TypeScript types
 public/
   manifest.json          PWA manifest
   sw.js                   Minimal offline-shell service worker
   icons/                   App icons (incl. maskable variants)
+firestore.rules        Security rules — each user can only access their own data
 ```
 
 ### Why a repository abstraction?
-Every page talks to `lib/data/index.ts` → `repository`, never to Dexie directly.
-`LocalRepository` implements it today with IndexedDB. When you're ready for
-multi-device sync, implement `FirebaseRepository` against the same interface
-and swap one line in `lib/data/index.ts` — no component changes required.
+Every page talks to `lib/data/index.ts` → `repository`, never to Firestore
+directly. `FirebaseRepository` implements it today, with a `subscribeAll()`
+method pages use for real-time updates — that's the actual mechanism behind
+data staying in sync across tabs and devices. Swapping storage backends
+again in the future (if ever needed) is still just one line in
+`lib/data/index.ts`.
 
 ## Local development
+
 
 Requirements: Node.js 18.18+ (Node 20 LTS recommended).
 
@@ -113,40 +122,51 @@ install from `localhost` in most browsers):
 The service worker (`public/sw.js`) caches the app shell so it keeps working
 with no connection after the first visit.
 
-## Data storage & backup
+## Data storage, sync & backup
 
-All data lives in IndexedDB, scoped to the browser/device you're using —
-nothing is sent anywhere. Because of that:
+Data lives in Firestore, under `users/{your-uid}/...`, and syncs in
+real time — checking a habit on your phone shows up on your laptop within
+a second or two, no refresh needed. That live update comes from
+`repository.subscribeAll()` in `lib/data/firebase-repository.ts`, which
+every page is subscribed to via `useAppData()`.
 
-- Clearing site data / browser storage will delete it. **Export a backup
-  regularly** (Data & Backup → Export backup) if that matters to you.
-- Data does **not** sync across devices or browsers by itself (see Firebase
-  section below).
-- **Data & Backup** page: export a full JSON backup, import one back
-  (merge or replace), and export your completion history as CSV.
+- Firestore also keeps a local persistent cache (`lib/firebase/config.ts`),
+  so the app still works offline and across multiple tabs on one device —
+  changes queue locally and sync once you're back online.
+- Access is restricted to each signed-in user's own data — see
+  `firestore.rules`. No one, including other signed-in users, can read
+  someone else's habits.
+- **Data & Backup** page still works the same as before: export a full
+  JSON backup, import one back (merge or replace), export CSV.
+- Signing out and back in with the same Google account restores everything
+  — nothing is tied to a single device or browser anymore.
 
-## Adding future Firebase sync (optional, not required to run the app)
+## Adding cloud sync — already done; here's what changed
 
-1. Create a Firebase project, add the config to environment variables.
-2. Implement each method of `DataRepository` in
-   `lib/data/firebase-repository.ts` against Firestore (and Firebase Auth
-   if you want accounts).
-3. In `lib/data/index.ts`, change:
-   ```ts
-   export const repository: DataRepository = new LocalRepository();
-   ```
-   to:
-   ```ts
-   export const repository: DataRepository = new FirebaseRepository();
-   ```
-4. Nothing else changes — every page already goes through `repository`.
+This used to be a "future" section describing how to add Firebase. That
+migration is now complete:
+
+1. `lib/data/firebase-repository.ts` implements every `DataRepository`
+   method against Firestore, plus `subscribeAll()` for real-time push.
+2. `lib/data/index.ts` now exports `new FirebaseRepository()` as the active
+   repository.
+3. `hooks/useAuth.tsx` + `components/auth/` gate the whole app behind
+   Google Sign-In (`components/auth/AuthGate.tsx` shows
+   `LoginScreen.tsx` until someone's signed in).
+
+`LocalRepository`/Dexie/IndexedDB-as-primary-store are no longer used, but
+the code is left in place in case an offline-only mode is ever wanted
+again — swapping back is still just editing that one line in
+`lib/data/index.ts`, same as before.
 
 ## Environment variables
 
-None required to run the app. One optional variable enables analytics:
+Firebase config (6 values) is **required** now — see `FIREBASE_SETUP.md`.
+One more variable is optional:
 
 | Variable | Required? | Purpose |
 |---|---|---|
+| `NEXT_PUBLIC_FIREBASE_*` (6 values) | **Yes** | Firebase project config — see `FIREBASE_SETUP.md` |
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | No | Google Analytics 4 Measurement ID (e.g. `G-XXXXXXXXXX`). Leave unset and GA never loads — zero extra network calls. |
 
 ### Adding Google Analytics
@@ -177,7 +197,12 @@ profile URLs.
 - The service worker uses a straightforward stale-while-revalidate cache
   rather than a generated precache manifest, so it's robust but not as
   finely tuned as `next-pwa`/Workbox would be. It's sufficient for a
-  personal single-user app.
-- `FirebaseRepository` is an unimplemented placeholder by design (per the
-  "don't require Firebase in v1" requirement) — it throws a clear error if
-  ever selected before you implement it.
+  personal app.
+- The persistent multi-tab Firestore cache setup in `lib/firebase/config.ts`
+  uses a newer part of the Firebase SDK surface that couldn't be verified
+  against real installed types in the sandbox this was built in (no
+  internet access to run `npm install` there) — see `FIREBASE_SETUP.md`'s
+  last section if `npm run build` errors near that file.
+- Old data from before this Firebase migration (if you were using an
+  earlier IndexedDB-only version of this app) does not automatically carry
+  over — every account starts fresh with the seeded default habits.

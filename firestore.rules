@@ -1,0 +1,14 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Every user's data lives entirely under users/{uid}/... . A signed-in
+    // user may read and write only their own subtree -- never anyone
+    // else's, and never unauthenticated. This is the entire access model:
+    // there is no cross-user read of habits/completions/etc anywhere.
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

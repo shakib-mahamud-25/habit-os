@@ -1,8 +1,9 @@
 import { DataRepository } from './repository';
-import { LocalRepository } from './local-repository';
+import { FirebaseRepository } from './firebase-repository';
 
-// Swap this line for `new FirebaseRepository()` once cloud sync is implemented.
-// Nothing else in the app needs to change — every component talks to
-// `repository`, never to Dexie or Firebase directly.
-export const repository: DataRepository = new LocalRepository();
+// Now backed by Firestore for real-time cross-tab/cross-device sync.
+// LocalRepository (lib/data/local-repository.ts) still implements the same
+// interface and is kept in the codebase for reference / a possible future
+// offline-only mode, but isn't the active repository.
+export const repository: DataRepository = new FirebaseRepository();
 export type { DataRepository } from './repository';
